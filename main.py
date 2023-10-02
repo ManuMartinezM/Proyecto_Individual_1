@@ -18,8 +18,11 @@ def PlayTimeGenre(genre: str):
     # Filter the dataset by the specified genre
     genre_data = df[df['genres'] == genre]
 
+    # Extract the year from the 'release_date' column
+    genre_data['release_year'] = pd.to_datetime(genre_data['release_date']).dt.year
+
     # Group the filtered data by release year and calculate total playtime
-    year_playtime = genre_data.groupby('release_date')['playtime_forever'].sum()
+    year_playtime = genre_data.groupby('release_year')['playtime_forever'].sum()
 
     # Find the year with the highest total playtime
     most_played_year = year_playtime.idxmax()
@@ -34,7 +37,7 @@ if __name__ == "__main__":
 @app.get("/UserForGenre/{genre}")
 def UserForGenre(genre: str):
     # Filter the dataset by the specified genre
-    genre_data = final_df[final_df['genres'] == genre]
+    genre_data = df[df['genres'] == genre]
 
     # Group the filtered data by user and release year, calculating total playtime
     user_year_playtime = genre_data.groupby(['user_id', 'release_date'])['playtime_forever'].sum().reset_index()

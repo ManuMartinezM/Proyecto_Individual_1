@@ -1,9 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import LabelEncoder
-import numpy as np
 
 app = FastAPI()
 
@@ -154,5 +152,17 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
+# Function for user-item recommendation
+def user_recommendation(user_id):
+    user_history = df[df['user_id'] == user_id]
+    user_preferences = user_history.groupby('item_name')['playtime_forever'].mean().reset_index()
+    user_preferences = user_preferences.sort_values(by='playtime_forever', ascending=False)
+    recommended_games = user_preferences['item_name'].head(5).tolist()
+    return recommended_games
 
+# User-item recommendation endpoint
+@app.get("/UserRecommendation/{user_id}")
+def user_item_recommendation(user_id: str):
+    recommended_games = user_recommendation(user_id)
+    return {"Recommended Games": recommended_games}
 

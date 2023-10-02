@@ -39,6 +39,9 @@ def UserForGenre(genre: str):
     # Filter the dataset by the specified genre
     genre_data = df[df['genres'] == genre]
 
+    # Extract the year from the 'release_date' column
+    genre_data['posted'] = pd.to_datetime(genre_data['posted']).dt.year
+
     # Group the filtered data by user and release year, calculating total playtime
     user_year_playtime = genre_data.groupby(['user_id', 'posted'])['playtime_forever'].sum().reset_index()
 
@@ -47,6 +50,10 @@ def UserForGenre(genre: str):
 
     # Get the sum of hours for each individual year as a list of dictionaries
     year_sum_list = user_year_playtime.groupby('posted')['playtime_forever'].sum().reset_index().to_dict(orient='records')
+
+    # Extract just the year portion
+    for item in year_sum_list:
+        item['release_year'] = item['release_year'].year  # Extract year
 
     return {"genre": genre, "most_played_user": most_played_user, "year_sum_list": year_sum_list}
 
@@ -151,3 +158,59 @@ def user_item_recommendation(user_id: str):
     recommended_games = user_recommendation(user_id)
     return {"Recommended Games": recommended_games}
 
+
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import TruncatedSVD
+import numpy as np
+
+# Encode the 'item_name' column into numerical values
+label_encoder = LabelEncoder()
+df['item_name_encoded'] = label_encoder.fit_transform(df['item_name'])
+
+# Standardize the 'playtime_forever' column (optional but recommended)
+scaler = StandardScaler()
+df['playtime_forever_st'] = scaler.fit_transform(df['playtime_forever'].values.reshape(-1, 1))
+
+# Create a DataFrame with the features for cosine similarity
+item_features = df[['item_name_encoded', 'playtime_forever_st']]
+similarity_matrix = cosine_similarity(item_features, item_features)
+
+# Specify the desired number of components (dimensions)
+n_components = 200  # Adjust this number based on your dataset and memory constraints
+
+# Initialize and fit Truncated SVD
+svd = TruncatedSVD(n_components=n_components)
+item_features_reduced = svd.fit_transform(item_features)
+
+# Calculate cosine similarity in batches
+batch_size = 1000  # Adjust the batch size as needed
+n_items = item_features_reduced.shape[0]
+similarity_matrix = None
+
+for start_idx in range(0, n_items, batch_size):
+    end_idx = min(start_idx + batch_size, n_items)
+    batch_similarity = cosine_similarity(
+        item_features_reduced[start_idx:end_idx],
+        item_features_reduced
+    )
+
+    if similarity_matrix is None:
+        similarity_matrix = batch_similarity
+    else:
+        # Accumulate the batch similarity results
+        similarity_matrix = np.vstack((similarity_matrix, batch_similarity))
+
+
+# Item-item recommendation
+def game_recommendation(item_id):
+    item_index = df[df['item_name_encoded'] == label_encoder.transform([item_id])[0]].index[0]
+    similar_items_indices = similarity_matrix[item_index].argsort()[::-1][1:6]  # Exclude the item itself
+    recommended_games = label_encoder.inverse_transform(df.iloc[similar_items_indices]['item_name_encoded']).tolist()
+    return recommended_games
+
+# Item-item recommendation endpoint
+@app.get("/GameRecommendation/{item_id}")
+def item_item_recommendation(item_id: str):
+    recommended_games = game_recommendation(item_id)
+    return {"Recommended Games": recommended_games}

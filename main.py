@@ -15,19 +15,22 @@ df = pd.read_csv('final_data.csv')
 
 @app.get("/PlayTimeGenre/{genre}")
 def PlayTimeGenre(genre: str):
-    # Filter the DataFrame based on the given genre
-    genre_df = df[df['genres'].str.contains(genre)]
+    # Filter the DataFrame for the specified genre
+    genre_df = df[df['genres'] == genre]
 
     if genre_df.empty:
-        return {"error": "Genre not found"}
+        return {"error": "Genre not found in the dataset"}
 
-    # Group by release year and calculate total playtime for each year
-    year_playtime = genre_df.groupby(pd.to_datetime(genre_df['release_date']).dt.year)['playtime_forever'].sum()
+    # Convert the 'release_date' column to datetime and extract the year
+    genre_df['release_year'] = pd.to_datetime(genre_df['release_date']).dt.year
 
-    # Find the year with the maximum playtime
-    max_playtime_year = year_playtime.idxmax()
+    # Group by release year and sum playtime_forever for each year
+    year_playtime = genre_df.groupby('release_year')['playtime_forever'].sum()
 
-    return {"Release year with most hours played for genre": max_playtime_year}
+    # Find the year with the most playtime
+    most_played_years = year_playtime[year_playtime == year_playtime.max()].index.tolist()
+
+    return {"Release years with the most hours played for Genre " + genre: most_played_years}
 
 if __name__ == "__main__":
     import uvicorn
@@ -42,28 +45,29 @@ def UserForGenre(genre: str):
     if genre_df.empty:
         return {"error": "Genre not found"}
 
-    # Group by user and release year and calculate total playtime for each year
-    user_year_playtime = genre_df.groupby(['user_id', pd.to_datetime(genre_df['posted']).dt.year])['playtime_forever'].sum()
+    # Convert 'posted' column to datetime
+    genre_df['posted'] = pd.to_datetime(genre_df['posted'])
 
-    if user_year_playtime.empty:
-        return {"error": "No user data for the given genre"}
+    # Get a list of all unique years in the dataset
+    unique_years = genre_df['posted'].dt.year.unique()
 
-    # Find the user with the maximum playtime overall
-    max_playtime_user = user_year_playtime.groupby('user_id').sum().idxmax()
+    if not unique_years:
+        return {"error": "No data available for the specified genre"}
 
-    # Get the accumulated hours played for each year for the user with max playtime
-    user_max_playtime_data = user_year_playtime.loc[max_playtime_user].reset_index()
+    # Group by user and year, then calculate total playtime for each user and year
+    user_year_playtime = genre_df.groupby(['user_id', genre_df['posted'].dt.year])['playtime_forever'].sum()
 
-    # Filter the data for the specific years (2013, 2012, and 2011)
-    specific_years_data = user_max_playtime_data[user_max_playtime_data['posted']]
+    # Find the user(s) with the maximum playtime overall
+    max_playtime_users = user_year_playtime.groupby('user_id').sum().idxmax()
+
+    # Get the accumulated hours played for each year for the user(s) with max playtime
+    user_max_playtime_data = user_year_playtime.loc[max_playtime_users].reset_index()
 
     # Convert the data to a list of dictionaries
-    specific_years_data = [{"Year": int(row['posted']), "Hours": int(row['playtime_forever'])} for index, row in specific_years_data.iterrows()]
+    specific_years_data = [{"Year": int(row['posted'].year), "Hours": int(row['playtime_forever'])} for _, row in user_max_playtime_data.iterrows()]
 
-    return {
-        "User with most hours played overall": max_playtime_user,
-        "Hours played for specific years": specific_years_data
-        }
+    # Return the filtered data
+    return specific_years_data
 
 if __name__ == "__main__":
     import uvicorn

@@ -32,7 +32,7 @@ def PlayTimeGenre(genre: str):
 
     return {"genre": genre, "most_played_year": int(most_played_year)}
 
-
+@app.get("/UsersForGenre/{genre}")
 def UserForGenre(genre: str):
     # Filter the dataset by the specified genre
     genre_data = df[df['genres'] == genre]

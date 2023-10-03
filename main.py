@@ -1,15 +1,14 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, APIRouter
+from fastapi.openapi.models import OpenAPI, Info
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
 import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import NearestNeighbors
+import numpy as np
 
-app = FastAPI()
-
-# http://127.0.0.1:8000
-
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
+app = FastAPI()    # http://127.0.0.1:8000
 
 df = pd.read_csv('final_data.csv')
 
@@ -18,8 +17,12 @@ def PlayTimeGenre(genre: str):
     # Filter the dataset by the specified genre
     genre_data = df[df['genres'] == genre]
 
-    # Extract the year from the 'release_date' column
-    genre_data['release_year'] = pd.to_datetime(genre_data['release_date']).dt.year
+    # Check if the filtered DataFrame is empty
+    if genre_data.empty:
+        return {"genre": genre, "most_played_year": None}
+
+    # Use .loc to set the 'release_year' column
+    genre_data.loc[:, 'release_year'] = pd.to_datetime(genre_data['release_date']).dt.year
 
     # Group the filtered data by release year and calculate total playtime
     year_playtime = genre_data.groupby('release_year')['playtime_forever'].sum()
@@ -27,35 +30,29 @@ def PlayTimeGenre(genre: str):
     # Find the year with the highest total playtime
     most_played_year = year_playtime.idxmax()
 
-    return {"genre": genre, "most_played_year": most_played_year}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    return {"genre": genre, "most_played_year": int(most_played_year)}
 
 
-@app.get("/UserForGenre/{genre}")
 def UserForGenre(genre: str):
     # Filter the dataset by the specified genre
     genre_data = df[df['genres'] == genre]
 
-    # Extract the year from the 'release_date' column
-    genre_data['posted'] = pd.to_datetime(genre_data['posted']).dt.year
+    # Convert the 'posted' column to datetime when filtering the data
+    genre_data['posted'] = pd.to_datetime(genre_data['posted'])
 
-    # Group the filtered data by user and release year, calculating total playtime
-    user_year_playtime = genre_data.groupby(['user_id', 'posted'])['playtime_forever'].sum().reset_index()
+    # Group the filtered data by user, item_id (or item_name), and release year, and calculate total playtime
+    user_item_year_playtime = genre_data.groupby(['user_id', 'item_id', genre_data['posted'].dt.year])['playtime_forever'].sum().reset_index()
 
     # Find the user with the highest total playtime for that genre
-    most_played_user = user_year_playtime.groupby('user_id')['playtime_forever'].sum().idxmax()
+    most_played_user = user_item_year_playtime.groupby('user_id')['playtime_forever'].sum().idxmax()
 
-    # Get the sum of hours for each individual year as a list of dictionaries
-    year_sum_list = user_year_playtime.groupby('posted')['playtime_forever'].sum().reset_index().to_dict(orient='records')
+    # Filter data for the most played user
+    most_played_user_data = user_item_year_playtime[user_item_year_playtime['user_id'] == most_played_user]
 
-    # Extract just the year portion
-    for item in year_sum_list:
-        item['release_year'] = item['release_year'].year  # Extract year
+    # Create a list of accumulated playtime by year for the most played user
+    year_sum_list = most_played_user_data.rename(columns={'posted': 'Año', 'playtime_forever': 'Horas'}).to_dict(orient='records')
 
-    return {"genre": genre, "most_played_user": most_played_user, "year_sum_list": year_sum_list}
+    return {"Usuario con más horas jugadas para Género " + genre: most_played_user, "Horas jugadas": year_sum_list}
 
 if __name__ == "__main__":
     import uvicorn
@@ -131,14 +128,18 @@ def sentiment_analysis(year: int):
     if filtered_df.empty:
         return {"error": "No data found for the given year"}
 
-    # Count the reviews by sentiment analysis
-    sentiment_counts = filtered_df['sentiment_analysis'].value_counts().to_dict()
+    # Group by 'sentiment_analysis' and calculate the sum of each sentiment
+    grouped_sentiments = filtered_df.groupby(['sentiment_analysis'])['user_id'].nunique().reset_index()
 
-    # Map sentiment values to labels
-    sentiment_labels = {0: "Negative", 1: "Neutral", 2: "Positive"}
-    sentiment_counts_with_labels = {sentiment_labels[key]: value for key, value in sentiment_counts.items()}
+    # Rename the columns and map sentiment values to labels
+    grouped_sentiments.columns = ['Sentiment', 'Count']
+    sentiment_labels = {0: 'Negative', 1: 'Neutral', 2: 'Positive'}
+    grouped_sentiments['Sentiment'] = grouped_sentiments['Sentiment'].map(sentiment_labels)
 
-    return sentiment_counts_with_labels
+    # Convert the DataFrame to a dictionary
+    sentiment_counts = grouped_sentiments.set_index('Sentiment')['Count'].to_dict()
+
+    return sentiment_counts
 
 if __name__ == "__main__":
     import uvicorn
@@ -156,4 +157,43 @@ def user_recommendation(user_id):
 @app.get("/UserRecommendation/{user_id}")
 def user_item_recommendation(user_id: str):
     recommended_games = user_recommendation(user_id)
+    return {"Recommended Games": recommended_games}
+
+# Encode the 'item_name' column into numerical values
+label_encoder = LabelEncoder()
+df['item_name_encoded'] = label_encoder.fit_transform(df['item_name'])
+
+# Standardize the 'playtime_forever' column (optional but recommended)
+scaler = StandardScaler()
+df['playtime_forever_st'] = scaler.fit_transform(df['playtime_forever'].values.reshape(-1, 1))
+
+# Create a DataFrame with the features for K-nearest neighbors
+item_features = df[['item_name_encoded', 'playtime_forever_st']]
+
+# Initialize the K-nearest neighbors model
+knn_model = NearestNeighbors(n_neighbors=6, metric='cosine')
+
+# Fit the model to your item features
+knn_model.fit(item_features)
+
+# Item-item recommendation
+def game_recommendation_knn(item_id):
+    # Check if the item_id exists in the dataset
+    if item_id not in df['item_id'].values:
+        return {"Error": f"Item ID {item_id} not found in the dataset"}
+
+    # Find the index of the provided item_id in the dataset
+    item_index = df[df['item_id'] == item_id].index[0]
+
+    # Find the K-nearest neighbors
+    distances, indices = knn_model.kneighbors([item_features.iloc[item_index]], n_neighbors=6)
+
+    # Extract recommended games using inverse_transform
+    recommended_games = list(set(df.iloc[indices[0][1:5]]['item_name']))
+
+    return {"Recommended Games": recommended_games}
+
+@app.get("/game-recommendation/{item_id}")
+def get_game_recommendation_knn(item_id: str):
+    recommended_games = game_recommendation_knn(item_id)
     return {"Recommended Games": recommended_games}

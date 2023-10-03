@@ -189,11 +189,21 @@ def game_recommendation_knn(item_id):
     # Find the index of the provided item_id in the dataset
     item_index = df[df['item_id'] == item_id].index[0]
 
-    # Find the K-nearest neighbors
-    distances, indices = knn_model.kneighbors([item_features.iloc[item_index]], n_neighbors=6)
+    # Find the K-nearest neighbors, increase n_neighbors to ensure at least 5
+    n_neighbors = 10
+    distances, indices = knn_model.kneighbors([item_features.iloc[item_index]], n_neighbors=n_neighbors)
 
     # Extract recommended games using inverse_transform
-    recommended_games = list(set(df.iloc[indices[0][1:5]]['item_name']))
+    recommended_games = list(set(df.iloc[indices[0][1:n_neighbors]]['item_name']))
+
+    # Ensure you have at least 5 recommendations
+    while len(recommended_games) < 5 and n_neighbors < len(df):
+        n_neighbors += 1
+        distances, indices = knn_model.kneighbors([item_features.iloc[item_index]], n_neighbors=n_neighbors)
+        recommended_games = list(set(df.iloc[indices[0][1:n_neighbors]]['item_name']))
+
+    # Take the top 5 recommendations
+    recommended_games = recommended_games[:5]
 
     return {"Recommended Games": recommended_games}
 

@@ -32,6 +32,10 @@ def PlayTimeGenre(genre: str):
 
     return {"genre": genre, "most_played_year": int(most_played_year)}
 
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
 @app.get("/UsersForGenre/{genre}")
 def UserForGenre(genre: str):
     # Filter the dataset by the specified genre
